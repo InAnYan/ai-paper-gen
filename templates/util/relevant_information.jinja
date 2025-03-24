@@ -1,0 +1,7 @@
+--
+
+Here is some relevant information for you:
+{% for fact in facts -%}
+- ID: {{ fact.id }}.
+  Source: {{ fact.content }}
+{%- endfor %}

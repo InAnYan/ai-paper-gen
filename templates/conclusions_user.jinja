@@ -1,0 +1,7 @@
+Title: {{ title }}.
+Goal: {{ goal }}.
+Content:
+
+{% with paragraphs=content %}
+{% include "util/format_paragraphs.jinja" %}
+{% endwith %}

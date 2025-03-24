@@ -1,0 +1,14 @@
+{{ sentence.content }}
+{%- for cite in sentence.cites -%}
+{%- if loop.first -%}
+{{ ' ' }}[
+{%- endif -%}
+{{ cite }}
+{%- if not loop.last -%}
+,
+{%- endif -%}
+{%- if loop.last -%}
+]
+{%- endif -%}
+{%- endfor -%}
+.

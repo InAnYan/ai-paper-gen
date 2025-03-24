@@ -1,0 +1,6 @@
+{%- for sentence in paragraph.sentences -%}
+{%- include "util/format_sentence.jinja" -%}
+{%- if not loop.last -%}
+{{ ' ' }}
+{%- endif -%}
+{%- endfor -%}

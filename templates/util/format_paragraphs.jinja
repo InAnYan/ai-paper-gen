@@ -1,0 +1,6 @@
+{%- for paragraph in paragraphs -%}
+{%- include "util/format_paragraph.jinja" -%}
+{%- if not loop.last -%}
+{{ '\n\n' }} {# don't ask me how I got there #}
+{%- endif -%}
+{%- endfor -%}

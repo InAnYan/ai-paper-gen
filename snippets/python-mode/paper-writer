@@ -1,0 +1,13 @@
+# -*- mode: snippet -*-
+# name: paper-writer
+# key: pawr
+# --
+@step
+async def make_$1(self, ev: $2Request) -> $2Response:
+    return $2Response(
+        content=await quick_process(
+            self.llm,
+            self.goal_template,
+        )
+    )
+$0

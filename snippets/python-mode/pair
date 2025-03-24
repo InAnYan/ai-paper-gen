@@ -1,0 +1,10 @@
+# -*- mode: snippet -*-
+# name: pair
+# key: pa
+# --
+class $1Request(Event):
+    $0pass
+
+
+class $1Response(Event):
+    content: str
