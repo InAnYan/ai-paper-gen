@@ -30,19 +30,24 @@ class PaperTranslatorWorkflow(Workflow):
     llm: LLM
     translate_template: ChatTemplate
 
+    def __init__(self, llm: LLM, translate_template: ChatTemplate, **kwargs):
+        super().__init__(**kwargs)
+        self.llm = llm
+        self.translate_template = translate_template
+
     @step
-    async def translate_annotation(self, ev: TranslatePaper) -> TranslatedAnnotation:
+    async def translate_annotation(self, ev: TranslatePaperRequest) -> TranslatedAnnotation:
         return TranslatedAnnotation(
             content=await self.translate(ev, ev.paper.annotation)
         )
 
     @step(retry_policy=ConstantDelayRetryPolicy(maximum_attempts=3, delay=1))  # I'm too lazy to make a separate template for keywords. Though this would be better (need commas).
-    async def translate_keyword(self, ev: TranslatePaper) -> TranslatedKeywords:
+    async def translate_keyword(self, ev: TranslatePaperRequest) -> TranslatedKeywords:
         return TranslatedKeywords(
             content=[keyword.strip() for keyword in (await self.translate(ev, ', '.join(ev.paper.keywords))).split(',')]
         )
         
-    async def translate(self, ev: TranslatePaper, text: str) -> str:
+    async def translate(self, ev: TranslatePaperRequest, text: str) -> str:
         return await quick_process(
             self.llm,
             self.translate_template,

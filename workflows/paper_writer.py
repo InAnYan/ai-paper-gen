@@ -8,6 +8,8 @@ from util import ChatTemplate, quick_process
 from workflows.indexer import Index, Node
 from workflows.planner import Plan
 
+import jinja2
+
 
 class PaperWriteRequest(StartEvent):
     title: str
@@ -91,9 +93,9 @@ class PaperWriterWorkflow(Workflow):
     embedding_model: BaseEmbedding
     goal_template: ChatTemplate
     relevance_template: ChatTemplate
-    main_material_system_template: ChatTemplate
-    main_material_section_template: ChatTemplate
-    main_material_paragraph_template: ChatTemplate
+    main_material_system_template: jinja2.Template
+    main_material_section_template: jinja2.Template
+    main_material_paragraph_template: jinja2.Template
     conclusions_template: ChatTemplate
     annotation_template: ChatTemplate
     keywords_template: ChatTemplate
@@ -105,9 +107,9 @@ class PaperWriterWorkflow(Workflow):
         embedding_model: BaseEmbedding,
         goal_template: ChatTemplate,
         relevance_template: ChatTemplate,
-        main_material_system_template: ChatTemplate,
-        main_material_section_template: ChatTemplate,
-        main_material_paragraph_template: ChatTemplate,
+        main_material_system_template: jinja2.Template,
+        main_material_section_template: jinja2.Template,
+        main_material_paragraph_template: jinja2.Template,
         conclusions_template: ChatTemplate,
         annotation_template: ChatTemplate,
         keywords_template: ChatTemplate,
@@ -129,6 +131,13 @@ class PaperWriterWorkflow(Workflow):
         self.udc_template = udc_template
 
     @step
+    async def start(self, ctx: Context, ev: PaperWriteRequest) -> PaperLanguage | PaperTitle | PaperIndex | PaperPlan | None:
+        ctx.send_event(PaperLanguage(content=ev.language))
+        ctx.send_event(PaperTitle(content=ev.title))
+        ctx.send_event(PaperIndex(index=ev.index))
+        ctx.send_event(PaperPlan(plan=ev.plan))
+
+    @step
     async def make_goal(self, ctx: Context, evs: PaperLanguage | PaperTitle) -> Optional[Goal]:
         got: Optional[Tuple[PaperLanguage, PaperTitle]] = ctx.collect_events(evs, [PaperLanguage, PaperTitle])  # type: ignore
         
@@ -137,12 +146,12 @@ class PaperWriterWorkflow(Workflow):
         
         language, title = got
 
-        return await quick_process(
+        return Goal(content=await quick_process(
             self.llm,
             self.goal_template,
             language=language.content,
             title=title.content,
-        )
+        ))
 
     @step
     async def make_relevance(self, ctx: Context, evs: PaperTitle | PaperLanguage | Goal | PaperIndex) -> Optional[Relevance]:
@@ -224,7 +233,7 @@ class PaperWriterWorkflow(Workflow):
                 language=language.content,
                 goal=goal.content,
                 abstract=annotation.content,
-            ))
+            )).split(", ")
         )
 
     @step

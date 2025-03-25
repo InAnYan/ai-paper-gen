@@ -1,0 +1,5 @@
+# -*- mode: snippet -*-
+# name: quick-template
+# key: qt
+# --
+$1_template=quick_template(templates, "$1"),

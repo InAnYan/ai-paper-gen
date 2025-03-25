@@ -1,4 +1,5 @@
 # from __future__ import annotations
+import logging
 import asyncio
 from pprint import pprint
 from tempfile import NamedTemporaryFile
@@ -80,31 +81,34 @@ class RelatedWorkFinderWorkflow(Workflow):
 
     @step
     async def download_and_parse_paper(self, ev: PaperMetadata) -> Optional[Reference]:
-        url = ev.url
-        r = requests.get(url)
+        try:
+            url = ev.url
+            r = requests.get(url)
 
-        if not str(urlparse(url).path).endswith('pdf'): # It doesn't work as I thought.
-            soup = BeautifulSoup(r.text, 'html.parser')
-        
-            for link in soup.find_all('a', href=True):
-                href = link['href']  # type: ignore
-                href: str
+            if not str(urlparse(url).path).endswith('pdf'): # It doesn't work as I thought.
+                soup = BeautifulSoup(r.text, 'html.parser')
+            
+                for link in soup.find_all('a', href=True):
+                    href = link['href']  # type: ignore
+                    href: str
 
-                if str(urlparse(href).path).endswith('.pdf'):
-                    r = requests.get(urljoin(base_url(url), href))
-                    break
+                    if str(urlparse(href).path).endswith('.pdf'):
+                        r = requests.get(urljoin(base_url(url), href))
+                        break
 
-        with NamedTemporaryFile() as temp_file:
-            temp_file.write(r.content)
-            temp_file.flush()
+            with NamedTemporaryFile() as temp_file:
+                temp_file.write(r.content)
+                temp_file.flush()
 
-            docs = await SimpleDirectoryReader(input_files=[temp_file.name]).aload_data()
+                docs = await SimpleDirectoryReader(input_files=[temp_file.name]).aload_data()
 
-            return Reference(
-                metadata=ev.metadata,
-                url=ev.url,
-                content='\n'.join(doc.text for doc in docs)
-            )
+                return Reference(
+                    metadata=ev.metadata,
+                    url=ev.url,
+                    content='\n'.join(doc.text for doc in docs)
+                )
+        except:
+            logging.warn("Skipping one paper")
 
     @step
     async def finish(self, ctx: Context, ev: Reference) -> Optional[RelatedWork]:

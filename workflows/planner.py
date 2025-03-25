@@ -37,7 +37,8 @@ class PlannerWorkflow(Workflow):
 
     def __init__(self, llm: LLM, chat_template: ChatTemplate, **kwargs):
         super().__init__(**kwargs)
-        self.llm = llm.as_structured_llm(PlannerWorkflow.InternalPlan)
+        if llm:
+            self.llm = llm.as_structured_llm(PlannerWorkflow.InternalPlan)
         self.chat_template = chat_template
 
     class InternalParagraph(BaseModel):

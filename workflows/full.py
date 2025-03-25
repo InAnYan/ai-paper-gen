@@ -1,5 +1,5 @@
 from typing import Optional
-from llama_index.core.workflow import Context, StartEvent, StopEvent, Workflow, step
+from llama_index.core.workflow import Context, StartEvent, StopEvent, Workflow, step, Event
 
 from workflows.indexer import Document, Index, IndexGeneratorWorkflow, IndexRequest
 from workflows.paper_writer import PaperWriteRequest, PaperWriterWorkflow, WrittenPaper
@@ -20,6 +20,26 @@ class FinishedPaper(StopEvent):
     references: RelatedWork
 
 
+class NestedPlan(Event):
+    plan: Plan
+
+
+class NestedRelatedWork(Event):
+    related_work: RelatedWork
+
+
+class NestedIndex(Event):
+    index: Index
+
+
+class NestedWrittenPaper(Event):
+    written_paper: WrittenPaper
+
+
+class NestedPaperTranslated(Event):
+    paper_translated: PaperTranslated
+    
+
 class FullWritePaperWorkflow(Workflow):
     papers_per_query: int
 
@@ -28,28 +48,35 @@ class FullWritePaperWorkflow(Workflow):
         self.papers_per_query = papers_per_query
     
     @step
-    async def plan_paper(self, ev: WritePaperRequest, planner_workflow: PlannerWorkflow) -> Plan:
+    async def plan_paper(self, ev: WritePaperRequest, planner_workflow: PlannerWorkflow) -> NestedPlan:
         start = PlannerRequest(title=ev.title)
-        return await planner_workflow.run(start_event=start)
+        res = await planner_workflow.run(start_event=start)
+        return NestedPlan(plan=res)
 
     @step
-    async def find_related_work(self, ev: Plan, related_work_finder: RelatedWorkFinderWorkflow) -> RelatedWork:
+    async def find_related_work(self, ev: NestedPlan, related_work_finder: RelatedWorkFinderWorkflow) -> NestedRelatedWork:
         start = RelatedWorkFindRequest(
-            queries=ev.search_queries,
+            queries=ev.plan.search_queries,
             papers_per_query=self.papers_per_query,
         )
-        return await related_work_finder.run(start_event=start)
+        
+        res = await related_work_finder.run(start_event=start)
+        
+        return NestedRelatedWork(related_work=res)
 
     @step
-    async def index_related_work(self, ev: RelatedWork, index_generator: IndexGeneratorWorkflow) -> Index:
+    async def index_related_work(self, ev: NestedRelatedWork, index_generator: IndexGeneratorWorkflow) -> NestedIndex:
         start = IndexRequest(
-            documents=[Document(id=str(id), content=ref.content) for id, ref in enumerate(ev.references)]
+            documents=[Document(id=str(id), content=ref.content) for id, ref in enumerate(ev.related_work.references)]
         )
-        return await index_generator.run(start_event=start)
+
+        res = await index_generator.run(start_event=start)
+        
+        return NestedIndex(index=res)
 
     @step
-    async def write_paper(self, ctx: Context, evs: WritePaperRequest | Plan | Index, paper_writer: PaperWriterWorkflow) -> Optional[WrittenPaper]:
-        got: Optional[Tuple[WritePaperRequest, Plan, Index]] = ctx.collect_events(evs, [WritePaperRequest, Plan, Index])  # type: ignore
+    async def write_paper(self, ctx: Context, evs: WritePaperRequest | NestedPlan | NestedIndex, paper_writer: PaperWriterWorkflow) -> Optional[NestedWrittenPaper]:
+        got: Optional[Tuple[WritePaperRequest, NestedPlan, NestedIndex]] = ctx.collect_events(evs, [WritePaperRequest, NestedPlan, NestedIndex])  # type: ignore
         
         if not got:
             return None
@@ -58,16 +85,18 @@ class FullWritePaperWorkflow(Workflow):
 
         start = PaperWriteRequest(
             title=req.title,
-            plan=plan,
-            index=index,
+            plan=plan.plan,
+            index=index.index,
             language=req.language,
         )
         
-        return await paper_writer.run(start_event=start)
+        res = await paper_writer.run(start_event=start)
+
+        return NestedWrittenPaper(written_paper=res)
 
     @step
-    async def translate_paper(self, ctx: Context, evs: WritePaperRequest | WrittenPaper, translator: PaperTranslatorWorkflow) -> Optional[PaperTranslated]:
-        got: Optional[Tuple[WritePaperRequest, WrittenPaper]] = ctx.collect_events(evs, [WritePaperRequest, WrittenPaper])  # type: ignore
+    async def translate_paper(self, ctx: Context, evs: WritePaperRequest | NestedWrittenPaper, translator: PaperTranslatorWorkflow) -> Optional[NestedPaperTranslated]:
+        got: Optional[Tuple[WritePaperRequest, NestedWrittenPaper]] = ctx.collect_events(evs, [WritePaperRequest, NestedWrittenPaper])  # type: ignore
         
         if not got:
             return None
@@ -78,16 +107,18 @@ class FullWritePaperWorkflow(Workflow):
             return None
         
         start = TranslatePaperRequest(
-            paper=paper,
+            paper=paper.written_paper,
             from_language=req.language,
             to_language=req.translate_to_language,
         )
 
-        return await translator.run(start_event=start)
+        res = await translator.run(start_event=start)
+
+        return NestedPaperTranslated(paper_translated=res)
 
     @step
-    async def finish(self, ctx: Context, evs: WritePaperRequest | WrittenPaper | RelatedWork) -> Optional[FinishedPaper]:
-        got: Optional[Tuple[WritePaperRequest, WrittenPaper, RelatedWork]] = ctx.collect_events(evs, [WritePaperRequest, WrittenPaper, RelatedWork])  # type: ignore
+    async def finish(self, ctx: Context, evs: NestedPaperTranslated | WritePaperRequest | NestedWrittenPaper | NestedRelatedWork) -> Optional[FinishedPaper]:
+        got: Optional[Tuple[WritePaperRequest, NestedWrittenPaper, NestedRelatedWork]] = ctx.collect_events(evs, [WritePaperRequest, NestedWrittenPaper, NestedRelatedWork])  # type: ignore
         
         if not got:
             return None
@@ -100,9 +131,7 @@ class FullWritePaperWorkflow(Workflow):
             translated = None
 
         return FinishedPaper(
-            paper=paper,
-            references=references,
-            translated=translated,
+            paper=paper.written_paper,
+            references=references.related_work.references,
+            translated=translated.paper_translated if translated else None,
         )
-
-
