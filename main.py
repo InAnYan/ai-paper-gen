@@ -14,10 +14,9 @@ from llama_index.llms.openai import OpenAI
 from llama_index.embeddings.openai import OpenAIEmbedding
 
 from workflows.planner import PlannerWorkflow
-from workflows.paper_translator import PaperTranslatorWorkflow
 from workflows.indexer import IndexGeneratorWorkflow
 from workflows.full import FullWritePaperWorkflow, WritePaperRequest
-from workflows.paper_writer import PaperWriterWorkflow
+from workflows.paper_writer import PaperWriterWorkflow, WrittenPaper
 from workflows.related_work_finder import RelatedWorkFinderWorkflow
 
 from util import quick_template
@@ -25,6 +24,31 @@ from util import quick_template
 
 logging.basicConfig(stream=sys.stderr, level=logging.DEBUG, format="%(asctime)s %(levelname)s: %(message)s")
 logging.getLogger().addHandler(logging.StreamHandler(stream=sys.stderr))
+
+
+
+# from phoenix.otel import register
+
+# # configure the Phoenix tracer
+# tracer_provider = register(
+#   project_name="my-llm-app", # Default is 'default'
+#   auto_instrument=True # See 'Trace all calls made to a library' below
+# )
+# tracer = tracer_provider.get_tracer(__name__)
+
+
+# from openinference.instrumentation.llama_index import LlamaIndexInstrumentor
+
+# LlamaIndexInstrumentor().instrument(tracer_provider=tracer_provider)
+
+
+# import mlflow
+
+# mlflow.llama_index.autolog()
+
+from traceloop.sdk import Traceloop
+
+Traceloop.init()
 
 
 import asyncio
@@ -53,7 +77,6 @@ def app():
 @click.argument('language', type=str)
 @click.argument('output', type=click.Path(exists=False, file_okay=True, dir_okay=False))
 @click.option('--templates-dir', type=click.Path(exists=True, file_okay=False, dir_okay=True), help='Directory for LLM message templates', required=True, default="templates/")
-@click.option('--translate-to-language', type=str, help='Translate parts of paper to other language additionally')
 @click.option('--llm-model', type=str, default='gpt-4o-mini', help='LLM model (currently, only OpenAI models are supported)')
 @click.option('--embedding-model', type=str, default='text-embedding-3-small', help='LLM model (currently, only OpenAI models are supported)')
 @click.option('--checkpoints-file', type=click.Path(), default='checkpoint.pickle', help='Checkpoints file (will be overwritten).', required=False)
@@ -63,7 +86,6 @@ async def generate_paper(
     language: str,
     output: click.Path,
     templates_dir: click.Path,
-    translate_to_language: str,
     llm_model: str,
     embedding_model: str,
     checkpoints_file: Optional[click.Path],
@@ -81,14 +103,13 @@ async def generate_paper(
     start = WritePaperRequest(
         title=title,
         language=language,
-        translate_to_language=translate_to_language,
     )
 
     try:
         result = await full_workflow.run(start_event=start)
         
         with open(str(output), 'w') as fout:
-            json.dump(result, fout)
+            json.dump(result.model_dump(), fout, ensure_ascii=False)
     except:
         logging.exception("Got an error")
 
@@ -106,15 +127,15 @@ async def generate_paper(
 @click.option('--embedding-model', type=str, default='text-embedding-3-small', help='LLM model (currently, only OpenAI models are supported)')
 @coro
 async def continue_checkpoint(
-    checkpoints_path: click.Path,
+    checkpoints_file: click.Path,
     output: click.Path,
     templates_dir: click.Path,
     llm_model: str,
     embedding_model: str,
 ):
-    with open(str(checkpoints_path), 'rb') as fin:
+    with open(str(checkpoints_file), 'rb') as fin:
         checkpoint: Checkpoint = pickle.load(fin)
-    
+
     full_workflow = build_workflow(
         templates_dir,
         llm_model,
@@ -125,13 +146,16 @@ async def continue_checkpoint(
         result = await full_workflow.run_from(checkpoint=checkpoint)
         
         with open(str(output), 'w') as fout:
-            json.dump(result, fout)
+            json.dump(result.model_dump(), fout, ensure_ascii=False)
     except:
         logging.exception("Got an error")
 
-    with open(str(checkpoints_path), 'wb') as fout:
-        checkpoint = list(full_workflow.checkpoints.items())[0][1][-1]
-        pickle.dump(checkpoint, fout)
+    checkpoint_items = list(full_workflow.checkpoints.items())
+
+    if checkpoint_items:
+        with open(str(checkpoints_file), 'wb') as fout:
+            checkpoint = checkpoint_items[0][1][-1]
+            pickle.dump(checkpoint, fout)
 
 
 def build_workflow(
@@ -148,12 +172,12 @@ def build_workflow(
         llm=llm,
         chat_template=quick_template(templates, "plan"),
         verbose=True,
-        timeout=1000,
+        timeout=None,
     )
 
     related_finder_workflow = RelatedWorkFinderWorkflow(
         verbose=True,
-        timeout=1000,
+        timeout=None,
     )
 
     token_text_splitter = TokenTextSplitter(chunk_size=512, chunk_overlap=50)
@@ -162,7 +186,7 @@ def build_workflow(
         splitter=token_text_splitter,
         embedding_model=embeddings,
         verbose=True,
-        timeout=1000,
+        timeout=None,
     )
 
     paper_writer_workflow = PaperWriterWorkflow(
@@ -178,20 +202,13 @@ def build_workflow(
         keywords_template=quick_template(templates, "keywords"),
         udc_template=quick_template(templates, "udc"),
         verbose=True,
-        timeout=1000,
+        timeout=None,
     )
 
     full_workflow = FullWritePaperWorkflow(
         papers_per_query=PAPERS_PER_QUERY,
         verbose=True,
-        timeout=1000,
-    )
-
-    paper_translator = PaperTranslatorWorkflow(
-        llm=llm,
-        translate_template=quick_template(templates, "translate"),
-        verbose=True,
-        timeout=1000,
+        timeout=None,
     )
 
     full_workflow.add_workflows(
@@ -199,7 +216,6 @@ def build_workflow(
         related_work_finder=related_finder_workflow,
         index_generator=indexer_workflow,
         paper_writer=paper_writer_workflow,
-        translator=paper_translator,
     )
 
     return WorkflowCheckpointer(workflow=full_workflow)

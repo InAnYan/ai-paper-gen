@@ -54,7 +54,7 @@ class WrittenPaper(StopEvent):
     annotation: str
     keywords: List[str]
     goal: str
-    relevance: str
+    relevance: Paragraph
     main_material: MainMaterial
     conclusions: List[str]
 
@@ -136,9 +136,10 @@ class PaperWriterWorkflow(Workflow):
         ctx.send_event(PaperTitle(content=ev.title))
         ctx.send_event(PaperIndex(index=ev.index))
         ctx.send_event(PaperPlan(plan=ev.plan))
+        print("MADE: start")
 
     @step
-    async def make_goal(self, ctx: Context, evs: PaperLanguage | PaperTitle) -> Optional[Goal]:
+    async def make_intermediate_1(self, ctx: Context, evs: PaperLanguage | PaperTitle) -> Optional[Goal]:
         got: Optional[Tuple[PaperLanguage, PaperTitle]] = ctx.collect_events(evs, [PaperLanguage, PaperTitle])  # type: ignore
         
         if not got:
@@ -146,6 +147,7 @@ class PaperWriterWorkflow(Workflow):
         
         language, title = got
 
+        print("MADE: make_goal")
         return Goal(content=await quick_process(
             self.llm,
             self.goal_template,
@@ -154,14 +156,15 @@ class PaperWriterWorkflow(Workflow):
         ))
 
     @step
-    async def make_relevance(self, ctx: Context, evs: PaperTitle | PaperLanguage | Goal | PaperIndex) -> Optional[Relevance]:
+    async def make_intermediate_2(self, ctx: Context, evs: PaperTitle | PaperLanguage | Goal | PaperIndex) -> Optional[Relevance]:
         got: Optional[Tuple[PaperTitle, PaperLanguage, Goal, PaperIndex]] = ctx.collect_events(evs, [PaperTitle, PaperLanguage, Goal, PaperIndex])  # type: ignore
         
         if not got:
             return None
         
         title, language, goal, index = got
-        
+
+        print("MADE: make_relevance")
         return Relevance(
             content=parse_paragraph(
                 await quick_process(
@@ -169,100 +172,21 @@ class PaperWriterWorkflow(Workflow):
                     self.relevance_template,
                     title=title.content,
                     goal=goal.content,
-                    lanuguage=language.content,
+                    language=language.content,
                     facts=await self.find_knowledge(index, 'relevance')
                 )
             )
         )
 
     @step
-    async def make_conclusions(self, ctx: Context, evs: PaperTitle | PaperLanguage | Goal | MainMaterial) -> Optional[Conclusions]:
-        got: Optional[Tuple[PaperTitle, PaperLanguage, Goal, MainMaterial]] = ctx.collect_events(evs, [PaperTitle, PaperLanguage, Goal, MainMaterial])  # type: ignore
-        
-        if not got:
-            return None
-        
-        title, language, goal, main_material = got
-        
-        return Conclusions(
-            content=(await quick_process(
-                self.llm,
-                self.conclusions_template,
-                language=language.content,
-                title=title.content,
-                goal=goal.content,
-                content=main_material.contents
-            )).split('\n\n')
-        )
-
-    @step
-    async def make_annotation(self, ctx: Context, evs: PaperTitle | PaperLanguage | Goal | MainMaterial | Conclusions) -> Optional[Annotation]:
-        got: Optional[Tuple[PaperTitle, PaperLanguage, Goal, MainMaterial, Conclusions]] = ctx.collect_events(evs, [PaperTitle, PaperLanguage, Goal, MainMaterial, Conclusions])  # type: ignore
-        
-        if not got:
-            return None
-        
-        title, language, goal, main_material, conclusions = got
-        
-        return Annotation(
-            content=await quick_process(
-                self.llm,
-                self.annotation_template,
-                title=title.content,
-                language=language.content,
-                goal=goal.content,
-                content=main_material,
-                conclusions=conclusions.content,
-            )
-        )
-
-    @step
-    async def make_keywords(self, ctx: Context, evs: PaperTitle | PaperLanguage | Goal | Annotation) -> Optional[Keywords]:
-        got: Optional[Tuple[PaperTitle, PaperLanguage, Goal, Annotation]] = ctx.collect_events(evs, [PaperTitle, PaperLanguage, Goal, Annotation])  # type: ignore
-        
-        if not got:
-            return None
-        
-        title, language, goal, annotation = got
-        
-        return Keywords(
-            content=(await quick_process(
-                self.llm,
-                self.keywords_template,
-                title=title.content,
-                language=language.content,
-                goal=goal.content,
-                abstract=annotation.content,
-            )).split(", ")
-        )
-
-    @step
-    async def make_udc(self, ctx: Context, evs: PaperTitle |  Goal | Annotation) -> Optional[Udc]:
-        got: Optional[Tuple[PaperTitle, Goal, Annotation]] = ctx.collect_events(evs, [PaperTitle, Goal, Annotation])  # type: ignore
-        
-        if not got:
-            return None
-
-        title, goal, annotation = got
-        
-        return Udc(
-            content=await quick_process(
-                self.llm,
-                self.udc_template,
-                title=title.content,
-                goal=goal.content,
-                abstract=annotation.content,
-            )
-        )
-
-    @step
-    async def make_main_material(self, ctx: Context, evs: PaperLanguage | PaperPlan | PaperIndex) -> Optional[MainMaterial]:
+    async def make_intermediate_3(self, ctx: Context, evs: PaperLanguage | PaperPlan | PaperIndex) -> Optional[MainMaterial]:
         got: Optional[Tuple[PaperLanguage, PaperPlan, PaperIndex]] = ctx.collect_events(evs, [PaperLanguage, PaperPlan, PaperIndex])  # type: ignore
 
         if not got:
             return None
 
         language, plan, index = got
+        plan = plan.plan
 
         paragraphs: List[Paragraph] = []
 
@@ -299,15 +223,102 @@ class PaperWriterWorkflow(Workflow):
 
                 paragraphs.append(parse_paragraph(str(res.message.content)))
 
+        print("MADE: make_main_material")
         return MainMaterial(paragraphs=paragraphs)
 
     @step
-    async def write_paper(
+    async def make_intermediate_4(self, ctx: Context, evs: PaperTitle | PaperLanguage | Goal | MainMaterial) -> Optional[Conclusions]:
+        got: Optional[Tuple[PaperTitle, PaperLanguage, Goal, MainMaterial]] = ctx.collect_events(evs, [PaperTitle, PaperLanguage, Goal, MainMaterial])  # type: ignore
+        
+        if not got:
+            return None
+        
+        title, language, goal, main_material = got
+
+        print("MADE: make_conclusions")
+        return Conclusions(
+            content=(await quick_process(
+                self.llm,
+                self.conclusions_template,
+                language=language.content,
+                title=title.content,
+                goal=goal.content,
+                content=main_material.paragraphs
+            )).split('\n\n')
+        )
+
+    @step
+    async def make_intermediate_5(self, ctx: Context, evs: PaperTitle | PaperLanguage | Goal | MainMaterial | Conclusions) -> Optional[Annotation]:
+        got: Optional[Tuple[PaperTitle, PaperLanguage, Goal, MainMaterial, Conclusions]] = ctx.collect_events(evs, [PaperTitle, PaperLanguage, Goal, MainMaterial, Conclusions])  # type: ignore
+        
+        if not got:
+            return None
+        
+        title, language, goal, main_material, conclusions = got
+
+        print("MADE: make_annotation")
+        return Annotation(
+            content=await quick_process(
+                self.llm,
+                self.annotation_template,
+                title=title.content,
+                language=language.content,
+                goal=goal.content,
+                content=main_material,
+                conclusions=conclusions.content,
+            )
+        )
+
+    @step
+    async def make_intermediate_6(self, ctx: Context, evs: PaperTitle | PaperLanguage | Goal | Annotation) -> Optional[Keywords]:
+        got: Optional[Tuple[PaperTitle, PaperLanguage, Goal, Annotation]] = ctx.collect_events(evs, [PaperTitle, PaperLanguage, Goal, Annotation])  # type: ignore
+
+        if not got:
+            print("KEYWORDS: not enough")
+            print("KEYWORDS: having " + str(ctx._events_buffer[ctx._get_full_path(type(evs))]))
+            return None
+        
+        title, language, goal, annotation = got
+
+        print("MADE: make_keywords")
+        return Keywords(
+            content=(await quick_process(
+                self.llm,
+                self.keywords_template,
+                title=title.content,
+                language=language.content,
+                goal=goal.content,
+                abstract=annotation.content,
+            )).split(", ")
+        )
+
+    @step
+    async def make_intermediate_7(self, ctx: Context, evs: PaperTitle | Goal | Annotation) -> Optional[Udc]:
+        got: Optional[Tuple[PaperTitle, Goal, Annotation]] = ctx.collect_events(evs, [PaperTitle, Goal, Annotation])  # type: ignore
+        
+        if not got:
+            return None
+
+        title, goal, annotation = got
+
+        print("MADE: make_udc")
+        return Udc(
+            content=await quick_process(
+                self.llm,
+                self.udc_template,
+                title=title.content,
+                goal=goal.content,
+                abstract=annotation.content,
+            )
+        )
+
+    @step
+    async def finish(
         self,
         ctx: Context,
         evs: Udc | Annotation | Keywords | Goal | Relevance | MainMaterial | Conclusions
     ) -> Optional[WrittenPaper]:
-        got: Optional[List[Udc | Annotation | Keywords | Goal | Relevance | MainMaterial | Conclusions]] = ctx.collect_events(evs, [Udc, Annotation, Keywords, Goal, Relevance, MainMaterial, Conclusions])  # type: ignore
+        got: Optional[Tuple[Udc | Annotation | Keywords | Goal | Relevance | MainMaterial | Conclusions]] = ctx.collect_events(evs, [Udc, Annotation, Keywords, Goal, Relevance, MainMaterial, Conclusions])  # type: ignore
 
         if not got:
             return None
@@ -318,9 +329,9 @@ class PaperWriterWorkflow(Workflow):
             udc=udc.content,
             annotation=annotation.content,
             keywords=keywords.content,
-            goal=goal.contents,
-            relevance=relevance.contents,
-            main_material=main_material.content,
+            goal=goal.content,
+            relevance=relevance.content,
+            main_material=main_material,
             conclusions=conclusions.content,
         )
 
@@ -343,7 +354,7 @@ class PaperWriterWorkflow(Workflow):
         facts = facts[:count]
 
         for fact in facts:
-            index.entries.remove(fact[0])
+            index.index.entries.remove(fact[0])
 
         return [t[0] for t in facts]
 

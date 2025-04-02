@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from pprint import pprint
 from dataclasses import dataclass
 from typing import List, Optional
@@ -16,6 +17,12 @@ class Document(BaseModel):
     id: str
     content: str
 
+    def __str__(self) -> str:
+        return f"Document(id={self.id}, content[:100]={self.content[:100]})"
+
+    def __repr__(self) -> str:
+        return self.__str__()
+
 
 class IndexRequest(StartEvent):
     documents: List[Document]
@@ -30,14 +37,35 @@ class Node(BaseModel):
     content: str
     vector: List[float]
 
+    def __str__(self) -> str:
+        return f"Node[{id(self)}]"
+
+    def __repr__(self) -> str:
+        return self.__str__()
+
 
 class Index(StopEvent):
     entries: List[Node]
+
+    def __str__(self) -> str:
+        return f"Index(len(entries)={len(self.entries)})"
+
+    def __repr__(self) -> str:
+        return self.__str__()
 
 
 class Nodes(Event):
     nodes: List[Node]
     
+    def __str__(self) -> str:
+        return f"Nodes[{id(self)}]"
+
+    def __repr__(self) -> str:
+        return self.__str__()
+
+
+NODES_BUFFER = 5
+
 
 class IndexGeneratorWorkflow(Workflow):
     splitter: TextSplitter
@@ -58,14 +86,22 @@ class IndexGeneratorWorkflow(Workflow):
 
     @step
     async def index_document(self, ev: DocumentToIndex) -> Nodes:
+        parts = [part.get_content() for part in await self.splitter.aget_nodes_from_documents([llama_index.core.Document(text=ev.document.content)])]
+        
+        if len(parts) == 0 or (len(parts) == 1 and parts[0] == ''):
+            logging.warning(f"Got a paper without content: {ev.document.id}. Skipping")
+            return Nodes(nodes=[])
+        
+        embeddings = await self.embedding_model.aget_text_embedding_batch(parts)
+
         return Nodes(
             nodes=[
                 Node(
                     document_id=ev.document.id,
-                    content=part.get_content(),
-                    vector=await self.embedding_model.aget_text_embedding(part.get_content()),
+                    content=part,
+                    vector=embedding,
                 )
-                for part in await self.splitter.aget_nodes_from_documents([llama_index.core.Document(text=ev.document.content)])
+                for part, embedding in zip(parts, embeddings)
             ]
         )
 

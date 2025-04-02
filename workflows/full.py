@@ -5,18 +5,15 @@ from workflows.indexer import Document, Index, IndexGeneratorWorkflow, IndexRequ
 from workflows.paper_writer import PaperWriteRequest, PaperWriterWorkflow, WrittenPaper
 from workflows.planner import Plan, PlannerRequest, PlannerWorkflow
 from workflows.related_work_finder import RelatedWork, RelatedWorkFindRequest, RelatedWorkFinderWorkflow
-from workflows.paper_translator import PaperTranslated, PaperTranslatorWorkflow, TranslatePaperRequest
 
 
 class WritePaperRequest(StartEvent):
     title: str
     language: str
-    translate_to_language: Optional[str]
 
 
 class FinishedPaper(StopEvent):
     paper: WrittenPaper
-    translated: Optional[PaperTranslated]
     references: RelatedWork
 
 
@@ -35,10 +32,6 @@ class NestedIndex(Event):
 class NestedWrittenPaper(Event):
     written_paper: WrittenPaper
 
-
-class NestedPaperTranslated(Event):
-    paper_translated: PaperTranslated
-    
 
 class FullWritePaperWorkflow(Workflow):
     papers_per_query: int
@@ -95,43 +88,16 @@ class FullWritePaperWorkflow(Workflow):
         return NestedWrittenPaper(written_paper=res)
 
     @step
-    async def translate_paper(self, ctx: Context, evs: WritePaperRequest | NestedWrittenPaper, translator: PaperTranslatorWorkflow) -> Optional[NestedPaperTranslated]:
-        got: Optional[Tuple[WritePaperRequest, NestedWrittenPaper]] = ctx.collect_events(evs, [WritePaperRequest, NestedWrittenPaper])  # type: ignore
+    async def finish(self, ctx: Context, evs: NestedWrittenPaper | NestedRelatedWork) -> Optional[FinishedPaper]:
+        got: Optional[Tuple[NestedWrittenPaper, NestedRelatedWork]] = ctx.collect_events(evs, [NestedWrittenPaper, NestedRelatedWork])  # type: ignore
         
         if not got:
+            print(f"Buffer: {ctx._events_buffer}")
             return None
         
-        req, paper = got
-
-        if not req.translate_to_language:
-            return None
-        
-        start = TranslatePaperRequest(
-            paper=paper.written_paper,
-            from_language=req.language,
-            to_language=req.translate_to_language,
-        )
-
-        res = await translator.run(start_event=start)
-
-        return NestedPaperTranslated(paper_translated=res)
-
-    @step
-    async def finish(self, ctx: Context, evs: NestedPaperTranslated | WritePaperRequest | NestedWrittenPaper | NestedRelatedWork) -> Optional[FinishedPaper]:
-        got: Optional[Tuple[WritePaperRequest, NestedWrittenPaper, NestedRelatedWork]] = ctx.collect_events(evs, [WritePaperRequest, NestedWrittenPaper, NestedRelatedWork])  # type: ignore
-        
-        if not got:
-            return None
-        
-        req, paper, references = got
-
-        if req.translate_to_language:
-            translated = await ctx.wait_for_event(PaperTranslated)
-        else:
-            translated = None
+        paper, references = got
 
         return FinishedPaper(
             paper=paper.written_paper,
-            references=references.related_work.references,
-            translated=translated.paper_translated if translated else None,
+            references=references.related_work,
         )

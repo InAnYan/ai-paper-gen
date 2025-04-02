@@ -6,13 +6,16 @@ from tempfile import NamedTemporaryFile
 from scholarly import scholarly
 from typing import Any, Dict, List, Optional
 from llama_index.core.workflow import Context, Event, StartEvent, StopEvent, Workflow, step
-from scholarly import scholarly
+from semanticscholar import SemanticScholar
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from llama_index.core import SimpleDirectoryReader
 from urllib.parse import urlparse, urljoin
 import urllib.parse
+
+from semanticscholar.PaginatedResults import PaginatedResults
+from semanticscholar.Paper import Paper
 
 
 class RelatedWorkFindRequest(StartEvent):
@@ -25,6 +28,12 @@ class Reference(Event):
     url: str
     content: str
 
+    def __str__(self) -> str:
+        return f"Reference(metadata={self.metadata}, url={self.url}, content[:100]={self.content[:100]})"
+
+    def __repr__(self) -> str:
+        return self.__str__()
+
     
 class RelatedWork(StopEvent):
     references: List[Reference]
@@ -32,6 +41,7 @@ class RelatedWork(StopEvent):
 
 class FindPaper(Event):
     query: str
+    count: int
 
 
 class PaperMetadata(Event):
@@ -40,6 +50,12 @@ class PaperMetadata(Event):
 
     
 class RelatedWorkFinderWorkflow(Workflow):
+    sch: SemanticScholar
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.sch = SemanticScholar()
+                
     @step
     async def start(self, ctx: Context, ev: RelatedWorkFindRequest) -> FindPaper:
         await ctx.set('paper_count', len(ev.queries) * ev.papers_per_query)
@@ -48,55 +64,36 @@ class RelatedWorkFinderWorkflow(Workflow):
             for _ in range(ev.papers_per_query):
                 ctx.send_event(FindPaper(
                     query=query,
+                    count=ev.papers_per_query,
                 ))
 
         return None  # type: ignore
 
     @step
     async def fetch_metadata(self, ctx: Context, ev: FindPaper) -> Optional[PaperMetadata]:
-        it = scholarly.search_pubs(ev.query)
-
         try:
-            pub = next(it)
-            # assert 'pub_url' in pub
-            url = pub['pub_url']
+            papers: PaginatedResults = self.sch.search_paper(query=ev.query, open_access_pdf=True, bulk=True, limit=ev.count)  # type: ignore
 
-            while self.is_banned(url) or await self.has_fetched(ctx, url):
-                pub = next(it)
-                # assert 'pub_url' in pub
-                url = pub['pub_url']
+            await self.decrement_paper_count(ctx, ev.count - len(papers.items))
 
-            # assert 'bib' in pub
+            for paper in papers.items:
+                paper: Paper
 
-            await self.add_url(ctx, pub['pub_url'])
-
-            return PaperMetadata(
-                metadata=pub['bib'],  # type: ignore
-                url=pub['pub_url'],
-            )
-
-        except StopIteration:
-            await ctx.set('paper_count', (self.get_paper_count(ctx) or 1) - 1)
+                ctx.send_event(PaperMetadata(
+                    metadata=paper.raw_data,
+                    url=paper.openAccessPdf['url']
+                ))
+        except Exception as e:
+            logging.exception(e)
+            await self.decrement_paper_count(ctx, ev.count)
             return None
 
     @step
-    async def download_and_parse_paper(self, ev: PaperMetadata) -> Optional[Reference]:
+    async def download_and_parse_paper(self, ctx: Context, ev: PaperMetadata) -> Optional[Reference]:
         try:
-            url = ev.url
-            r = requests.get(url)
+            r = requests.get(ev.url, timeout=10)
 
-            if not str(urlparse(url).path).endswith('pdf'): # It doesn't work as I thought.
-                soup = BeautifulSoup(r.text, 'html.parser')
-            
-                for link in soup.find_all('a', href=True):
-                    href = link['href']  # type: ignore
-                    href: str
-
-                    if str(urlparse(href).path).endswith('.pdf'):
-                        r = requests.get(urljoin(base_url(url), href))
-                        break
-
-            with NamedTemporaryFile() as temp_file:
+            with NamedTemporaryFile(suffix='.pdf') as temp_file:
                 temp_file.write(r.content)
                 temp_file.flush()
 
@@ -107,8 +104,10 @@ class RelatedWorkFinderWorkflow(Workflow):
                     url=ev.url,
                     content='\n'.join(doc.text for doc in docs)
                 )
-        except:
-            logging.warn("Skipping one paper")
+        except Exception as e:
+            logging.exception(e)
+            logging.warning(f"Skipping one paper: {ev.url}")
+            await self.decrement_paper_count(ctx, 1)
 
     @step
     async def finish(self, ctx: Context, ev: Reference) -> Optional[RelatedWork]:
@@ -131,6 +130,17 @@ class RelatedWorkFinderWorkflow(Workflow):
 
         return paper_count
 
+    async def decrement_paper_count(self, ctx: Context, amount: int):
+        if amount <= 0:
+            return
+        
+        paper_count = await self.get_paper_count(ctx)
+
+        if not paper_count:
+            return
+
+        await ctx.set('paper_count', paper_count - amount)
+
     async def has_fetched(self, ctx: Context, url: str) -> bool:
         urls: List[str] = await ctx.get('urls', [])
         return url in urls
@@ -141,10 +151,10 @@ class RelatedWorkFinderWorkflow(Workflow):
         await ctx.set('urls', urls)
 
     def is_banned(self, url: str) -> bool:
-        BANNED = ['elibrary', '.ru', 'books', 'sciencedirect']
+        BANNED = ['elibrary', '.ru', 'books', 'sciencedirect', 'emerald.com', 'springer']
 
         for ban in BANNED:
-            if url in ban:
+            if ban in url:
                 return True
 
         return False
