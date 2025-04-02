@@ -1,0 +1,77 @@
+#set text(hyphenate: false)
+
+#set heading(numbering: "1.1.")
+
+#set text(
+  font: "New Computer Modern",
+  size: 11pt
+)
+
+#set page(
+  paper: "a4",
+  margin: (x: 2cm, y: 2cm),
+  numbering: "1"
+)
+
+*{{ paper.udc }}*
+
+#align(center, text(16pt)[
+  *{{ paper.title }}*
+])
+
+#v(11pt)
+
+#set par(
+  justify: true,
+)
+
+#grid(
+  columns: (1fr),
+  align(center)[
+    John Doe \
+    #link("mailto:john.doe@somemail.com")
+  ]
+)
+
+#align(center)[
+  Your affilitation,
+  Location
+]
+
+#v(11pt)
+
+#align(center)[
+  #set par(justify: false)
+  *Abstract* \
+
+  {{ paper.annotation }}
+]
+
+*Keywords*: {% for keyword in paper.keywords %}{{ keyword }}{% if not loop.last %}, {% endif %}{% endfor %}
+
+#v(11pt)
+
+#show: rest => columns(2, rest)
+
+= Introduction
+
+*Goal* of the paper is {{ paper.goal }}.
+
+{% with paragraph=paper.relevance %}
+  {% include "format_paragraph.jinja" %}
+{% endwith %}
+
+= Main material
+
+{% with paragraphs=paper.main_material.paragraphs %}
+  {% include "format_paragraphs.jinja" %}
+{% endwith %}
+
+= Conclusions
+
+{% for conclusion_paragraph in paper.conclusions %}
+{{ conclusion_paragraph }}
+
+{% endfor %}
+
+#bibliography("lib.bib")

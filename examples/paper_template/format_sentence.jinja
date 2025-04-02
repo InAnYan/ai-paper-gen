@@ -1,0 +1,11 @@
+{{ sentence.content }}
+{%- for cite in sentence.cites -%}
+{%- if loop.first -%}
+{{ ' ' }}
+{%- endif -%}
+@ref{{ cite }}
+{%- if not loop.last -%}
+{{ ' ' }}
+{%- endif -%}
+{%- endfor -%}
+.

@@ -13,6 +13,7 @@ class WritePaperRequest(StartEvent):
 
 
 class FinishedPaper(StopEvent):
+    title: str
     paper: WrittenPaper
     references: RelatedWork
 
@@ -88,16 +89,17 @@ class FullWritePaperWorkflow(Workflow):
         return NestedWrittenPaper(written_paper=res)
 
     @step
-    async def finish(self, ctx: Context, evs: NestedWrittenPaper | NestedRelatedWork) -> Optional[FinishedPaper]:
-        got: Optional[Tuple[NestedWrittenPaper, NestedRelatedWork]] = ctx.collect_events(evs, [NestedWrittenPaper, NestedRelatedWork])  # type: ignore
+    async def finish(self, ctx: Context, evs: WritePaperRequest | NestedWrittenPaper | NestedRelatedWork) -> Optional[FinishedPaper]:
+        got: Optional[Tuple[WritePaperRequest, NestedWrittenPaper, NestedRelatedWork]] = ctx.collect_events(evs, [WritePaperRequest, NestedWrittenPaper, NestedRelatedWork])  # type: ignore
         
         if not got:
             print(f"Buffer: {ctx._events_buffer}")
             return None
         
-        paper, references = got
+        req, paper, references = got
 
         return FinishedPaper(
+            title=req.title,
             paper=paper.written_paper,
             references=references.related_work,
         )

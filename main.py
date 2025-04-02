@@ -6,12 +6,15 @@ import logging
 import jinja2
 from pathlib import Path
 import sys
+import os
 
 from llama_index.core.node_parser import TokenTextSplitter
 from llama_index.core.workflow import Checkpoint, WorkflowCheckpointer
 from llama_index.utils.workflow import draw_all_possible_flows
 from llama_index.llms.openai import OpenAI
 from llama_index.embeddings.openai import OpenAIEmbedding
+
+from jinja2 import Environment, Template, FileSystemLoader
 
 from workflows.planner import PlannerWorkflow
 from workflows.indexer import IndexGeneratorWorkflow
@@ -24,7 +27,6 @@ from util import quick_template
 
 logging.basicConfig(stream=sys.stderr, level=logging.DEBUG, format="%(asctime)s %(levelname)s: %(message)s")
 logging.getLogger().addHandler(logging.StreamHandler(stream=sys.stderr))
-
 
 
 # from phoenix.otel import register
@@ -40,15 +42,6 @@ logging.getLogger().addHandler(logging.StreamHandler(stream=sys.stderr))
 # from openinference.instrumentation.llama_index import LlamaIndexInstrumentor
 
 # LlamaIndexInstrumentor().instrument(tracer_provider=tracer_provider)
-
-
-# import mlflow
-
-# mlflow.llama_index.autolog()
-
-from traceloop.sdk import Traceloop
-
-Traceloop.init()
 
 
 import asyncio
@@ -157,6 +150,34 @@ async def continue_checkpoint(
             checkpoint = checkpoint_items[0][1][-1]
             pickle.dump(checkpoint, fout)
 
+
+@app.command()
+@click.argument('context', type=click.File('r'))
+@click.argument('template', type=click.Path(exists=True, dir_okay=True, file_okay=True))
+@click.argument('output_paper', type=click.File('w'))
+@click.argument('output_bibliography', type=click.File('w'))
+def fill_template(context: click.File, template: click.File, output_paper: click.File, output_bibliography: click.File):
+    """Use Jinja templates to fill a context generated from `generate-paper`.
+
+    `template` can be a directory of templates (root template must be `root.jinja`). It can be a file also."""
+
+    context = json.loads(context.read())
+    
+    if os.path.isdir(str(template)):
+        templates = Environment(loader=FileSystemLoader(str(template)))
+        output_paper.write(templates.get_template('root.jinja').render(context))
+    else:
+        template = Template(template.read())
+        output_paper.write(template.render(context))
+
+    # Next code is highly shitty. But I'm too lazy to make a proper product.
+
+    for id, reference in enumerate(context['references']['references']):
+        bibtex = reference['metadata']['citationStyles']['bibtex']
+        old_key = bibtex[bibtex.find('{')+1:bibtex.find(',')]
+        bibtex = bibtex.replace(old_key, f'ref{id}')
+        output_bibliography.write(bibtex + "\n\n")
+    
 
 def build_workflow(
     templates_dir: click.Path,

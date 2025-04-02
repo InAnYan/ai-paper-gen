@@ -24,7 +24,7 @@ class RelatedWorkFindRequest(StartEvent):
 
 
 class Reference(Event):
-    metadata: Dict[str, Any]  # BibTeX or BibLaTeX...
+    metadata: Dict[str, Any]  # BibTeX.
     url: str
     content: str
 
@@ -45,7 +45,7 @@ class FindPaper(Event):
 
 
 class PaperMetadata(Event):
-    metadata: Dict[str, Any]  # BibTeX or BibLaTeX...
+    metadata: Dict[str, Any]  # BibTeX.
     url: str
 
     

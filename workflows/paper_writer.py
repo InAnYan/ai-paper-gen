@@ -136,7 +136,6 @@ class PaperWriterWorkflow(Workflow):
         ctx.send_event(PaperTitle(content=ev.title))
         ctx.send_event(PaperIndex(index=ev.index))
         ctx.send_event(PaperPlan(plan=ev.plan))
-        print("MADE: start")
 
     @step
     async def make_intermediate_1(self, ctx: Context, evs: PaperLanguage | PaperTitle) -> Optional[Goal]:
@@ -147,7 +146,6 @@ class PaperWriterWorkflow(Workflow):
         
         language, title = got
 
-        print("MADE: make_goal")
         return Goal(content=await quick_process(
             self.llm,
             self.goal_template,
@@ -164,7 +162,6 @@ class PaperWriterWorkflow(Workflow):
         
         title, language, goal, index = got
 
-        print("MADE: make_relevance")
         return Relevance(
             content=parse_paragraph(
                 await quick_process(
@@ -223,7 +220,6 @@ class PaperWriterWorkflow(Workflow):
 
                 paragraphs.append(parse_paragraph(str(res.message.content)))
 
-        print("MADE: make_main_material")
         return MainMaterial(paragraphs=paragraphs)
 
     @step
@@ -235,7 +231,6 @@ class PaperWriterWorkflow(Workflow):
         
         title, language, goal, main_material = got
 
-        print("MADE: make_conclusions")
         return Conclusions(
             content=(await quick_process(
                 self.llm,
@@ -256,7 +251,6 @@ class PaperWriterWorkflow(Workflow):
         
         title, language, goal, main_material, conclusions = got
 
-        print("MADE: make_annotation")
         return Annotation(
             content=await quick_process(
                 self.llm,
@@ -274,13 +268,10 @@ class PaperWriterWorkflow(Workflow):
         got: Optional[Tuple[PaperTitle, PaperLanguage, Goal, Annotation]] = ctx.collect_events(evs, [PaperTitle, PaperLanguage, Goal, Annotation])  # type: ignore
 
         if not got:
-            print("KEYWORDS: not enough")
-            print("KEYWORDS: having " + str(ctx._events_buffer[ctx._get_full_path(type(evs))]))
             return None
         
         title, language, goal, annotation = got
 
-        print("MADE: make_keywords")
         return Keywords(
             content=(await quick_process(
                 self.llm,
@@ -301,7 +292,6 @@ class PaperWriterWorkflow(Workflow):
 
         title, goal, annotation = got
 
-        print("MADE: make_udc")
         return Udc(
             content=await quick_process(
                 self.llm,
